@@ -1,15 +1,58 @@
-if (typeof window === 'undefined') {
-	console.error('What are you doing? This isn\'t a Node.js file');
-	process.exit(1);
-}
+const colourRX = new RegExp('^#([a-f0-9]{3}|[a-f0-9]{6})\\b', 'i');
 
-// Height of each character block
-const width = 10;
-const height = 16;
+const pencil = {
+    create() {
+        this.canvas = document.getElementById('paint');
+        this.ctx = this.canvas.getContext('2d');
 
-let previous = null;
+        this.drawing = false;
+        this.createSnapshot();
+        this.resize();
 
-let painting = false;
+        this.canvas.addEventListener('mousedown', this.down.bind(this));
+        this.canvas.addEventListener('mousemove', this.move.bind(this));
+        this.canvas.addEventListener('mouseup', this.cancel.bind(this));
+        this.canvas.addEventListener('mouseout', this.cancel.bind(this));
+        document.getElementById('colour').addEventListener('change', this.setColour.bind(this));
+        document.getElementById('pen').addEventListener('change', this.setTipSize.bind(this));
+        window.addEventListener('resize', this.resize.bind(this));
+    },
+    down(event) {
+        const x = event.x - this.canvas.offsetLeft;
+        const y = event.y - this.canvas.offsetTop;
+        this.ctx.beginPath();
+        this.ctx.moveTo(x, y);
+        this.drawing = true;
+    },
+    move(event) {
+        if (!this.drawing) return;
+        const x = event.x - this.canvas.offsetLeft;
+        const y = event.y - this.canvas.offsetTop;
+        this.ctx.lineTo(x, y);
+        this.ctx.stroke();
+    },
+    cancel() {
+        this.drawing = false;
+        this.createSnapshot();
+    },
+    setColour(colour) {
+        if (colourRX.test(colour.target.value)) // Check for hexcodes
+            this.ctx.strokeStyle = colour.target.value;
+    },
+    setTipSize(size) {
+        size = Number(size.target.value);
+        if (size)
+            this.ctx.lineWidth = size;
+    },
+    createSnapshot() {
+        this.state = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+    },
+    resize() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+        this.ctx.putImageData(this.state, 0, 0);
+    }
+};
 
 function save() {
     const download = document.getElementById('download');
@@ -19,138 +62,6 @@ function save() {
     download.setAttribute('href', data);
 }
 
-function setColour(r, g, b) {
-	const colour = document.getElementById('colour');
-	const rgb = [...arguments].map(colour => colour.toString(16)).map((colour) => {
-		for (i = 0; i < (2 - colour.length); i += 1) {
-			colour += '0'
-		}
-		return colour;
-	}).join('');
-
-	colour.value = `#${rgb}`;
-};
-
-window.addEventListener('load', () => {
-	const paint = document.getElementById('paint');
-	const colour = document.getElementById('colour');
-	const rubber = document.getElementById('rubber');
-	const output = document.getElementById('output');
-	const canvas = paint.getContext('2d');
-	const area = paint.getBoundingClientRect();
-
-	const down = (point) => {
-		const realX = point.x * width;
-		const realY = point.y * height;
-
-		if (rubber.checked) {
-			canvas.clearRect(realX, realY, width, height);
-		} else {
-			canvas.fillRect(realX, realY, width, height);
-		}
-
-		let i = 0;
-		let j = 0;
-		let beforeColour = 'transparent';
-		let outString = '';
-
-		for (j = 0; j < paint.height; j += height) {
-			for (i = 0; i < paint.width; i += width) {
-				const data = canvas.getImageData(i, j, 1, 1).data;
-				let currentColour;
-				let outColour;
-				if (data[3]) {
-					currentColour = `rgb(${data[0]}, ${data[1]}, ${data[2]})`;
-					outColour = `\\x1b[48;2;${data[0]};${data[1]};${data[2]}m`;
-				} else {
-					currentColour = 'transparent';
-					outColour = '\\x1b[0m';
-				}
-
-				if (beforeColour !== currentColour) {
-					beforeColour = currentColour;
-					outString += outColour;
-				}
-				outString += ' ';
-			}
-			outString += '\n';
-		}
-		output.value = outString;
-	};
-
-	// https://stackoverflow.com/questions/4672279/bresenham-algorithm-in-javascript
-	const line = (previous, current) => {
-		const coordinates = [];
-		let x1 = previous.x;
-		let y1 = previous.y;
-		let x2 = current.x;
-		let y2 = current.y;
-
-		const dx = Math.abs(x2 - x1);
-		const dy = Math.abs(y2 - y1);
-		const sx = (x1 < x2) ? 1 : -1;
-		const sy = (y1 < y2) ? 1 : -1;
-		let err = dx - dy;
-
-		coordinates.push(previous);
-
-		while(!((x1 === x2) && (y1 === y2))) {
-			const e2 = err << 1;
-			if (e2 > -dy) {
-				err -= dy;
-				x1 += sx;
-			}
-			if (e2 < dx) {
-				err += dx;
-				y1 += sy;
-			}
-			coordinates.push({
-				x: x1,
-				y: y1
-			})
-		}
-		coordinates.forEach((point) => {
-			down(point);
-		})
-	};
-
-	paint.addEventListener('mousedown', (e) => {
-		const x = Math.floor((e.pageX - paint.offsetLeft) / width);
-		const y = Math.floor((e.pageY - paint.offsetTop) / height);
-		canvas.fillStyle = colour.value;
-		down({
-			x, y
-		});
-		
-		painting = true;
-	});
-
-	paint.addEventListener('mousemove', (e) => {
-		const x = Math.floor((e.pageX - paint.offsetLeft) / width);
-		const y = Math.floor((e.pageY - paint.offsetTop) / height);
-		if (painting) {
-			down({
-				x, y
-			});
-			if (previous) {
-				line(previous, {
-					x, y
-				});
-			}
-			previous = {
-				x, y
-			}
-		}
-	})
-
-	paint.addEventListener('mouseup', () => {
-		painting = false;
-		previous = null;
-	});
-
-	paint.addEventListener('mouseout', () => {
-		painting = false;
-		previous = null;
-	});
-});
-
+function setup() {
+    pencil.create();
+}
